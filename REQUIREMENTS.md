@@ -2,13 +2,13 @@
 
 We are building a small experimental network that allows a laptop to access a remote website through DNS — even when all normal Internet traffic is blocked.
 
-Our system will use a Raspberry Pi as a Wi-Fi access point (acting like a locked public hotspot) and a Linux server in our dorm that runs as the DNS nameserver and tunneling endpoint. When the client connects to the Pi’s SSID, the only thing it can do is make DNS requests. Those requests are routed to our dorm server, which carries actual web data back and forth through the DNS protocol.
+Our system will use a Raspberry Pi as a Wi-Fi access point (acting like a locked public hotspot) and a Linux server in our dorm that runs as the DNS nameserver and tunneling endpoint. When the client connects to the Pi's SSID, the only thing it can do is make DNS requests. Those requests are routed to our dorm server, which carries actual web data back and forth through the DNS protocol.
 
-To make this connection reliable, we will build our own lightweight transport features (similar to TCP) — such as sequence numbers, acknowledgments, timeouts, and retransmissions — so that data arrives in order and without loss.
+To make this connection reliable, we will implement a **Stop-and-Wait protocol** (alternating bit) with sequence numbers, acknowledgments, timeouts, and retransmissions — ensuring data arrives in order and without loss, one packet at a time.
 
 The final goal is for the client to type a command like:
 
-$ python tunnel_client.py http://example.com
+$ python tunnel_client.py http://example.com/page.html
 
 and receive the HTML content of that page, even though HTTP and HTTPS are blocked.
 
@@ -19,9 +19,9 @@ and receive the HTML content of that page, even though HTTP and HTTPS are blocke
 Captive or filtered networks — such as airport Wi-Fi or campus guest networks — often block all outgoing traffic except DNS. We want to reproduce this scenario safely and legally on our own hardware to understand:
 	•	how such restrictions work,
 	•	what it takes to pass data through DNS, and
-	•	how reliability can be achieved when using an unreliable protocol.
+	•	how reliability can be achieved over an unreliable protocol using Stop-and-Wait.
 
-The project demonstrates that even when only DNS is available, it’s possible to build a working data transfer system — and shows the security and performance trade-offs such systems create.
+This project demonstrates the fundamentals of reliable data transfer (as taught in COSC 60) applied to a real-world constraint: building a working data channel when only DNS is available. It shows both the security implications and severe performance limitations of such systems.
 
 ⸻
 
@@ -39,57 +39,95 @@ Target Website (on the dorm server or local network)	Hosts a few HTML pages to d
 4. Functional requirements
 	1.	Network simulation
 	•	The Pi acts as an isolated Wi-Fi hotspot with no Internet access.
-	•	Only DNS (UDP 53) traffic is forwarded to the dorm server; all other packets are dropped.
+	•	Only DNS (UDP 53) traffic is forwarded to the dorm server; all other packets are dropped using iptables.
 	•	The dorm server acts as both the DNS resolver and tunnel endpoint.
-	2.	Handshake and session setup
-	•	The client begins with a simple three-step handshake (SYN → SYN-ACK → ACK) to open a session.
-	•	Each session has a random ID and defined limits such as packet size and timeout.
-	3.	Reliable data transfer
-	•	Every data packet includes a sequence number and checksum.
-	•	The server replies with ACKs confirming receipt.
-	•	Lost packets are retransmitted after a timeout.
-	•	The client and server use a fixed-size sliding window to keep multiple packets in flight.
-	4.	Caching avoidance
-	•	Queries include a random label (nonce) so that caching resolvers never return stale responses.
+	2.	Reliable data transfer using Stop-and-Wait
+	•	Every data packet includes an alternating sequence number (0 or 1) and a simple checksum (CRC32).
+	•	The server replies with ACK-0 or ACK-1 to confirm receipt of the corresponding packet.
+	•	The sender waits for ACK before sending the next packet (one packet in flight at a time).
+	•	If no ACK is received within 2 seconds, the sender retransmits the same packet.
+	•	The receiver ignores duplicate packets (same sequence number) and re-sends the ACK.
+	3.	Data encoding in DNS
+	•	Client encodes data as Base64 in subdomain labels: <b64_data>.<seq>.<session_id>.tunnel.local
+	•	Server responds with TXT records containing Base64-encoded response data and ACK flag.
+	•	Maximum chunk size: ~200 bytes per DNS query/response to stay within DNS limits.
+	4.	Session management (simplified)
+	•	Session starts implicitly with first request (no formal handshake).
+	•	Each session has a random 6-character session ID.
+	•	Session ends when client sends FIN packet or after 60 seconds of inactivity.
 	5.	Application behavior
-	•	The client requests an HTML page (e.g., /index.html).
-	•	The server fetches that page from the dorm web host and sends it back over DNS in small pieces.
-	•	The client reconstructs the page and saves it to disk.
+	•	The client requests an HTML page (e.g., /page.html).
+	•	The server fetches that page from a local HTTP server (or file) and sends it back over DNS in chunks.
+	•	The client reconstructs the page and displays/saves it to disk.
 	6.	Testing and reliability
-	•	We will test on a closed network, using tc netem on the Pi to introduce simulated packet loss and latency.
-	•	Transfers must complete correctly under up to 5 % simulated packet loss.
+	•	We will test on a closed network, using tc netem on the Pi to introduce 5-10% packet loss.
+	•	Transfers must complete correctly with visible retransmissions logged.
+	•	Test with at least one HTML file (~2-5 KB) to demonstrate multiple packet transfers.
 
 ⸻
 
 5. Success criteria
-	•	The client can retrieve a simple HTML file (≈ 10 KB) over DNS with full integrity.
-	•	Packets are ordered correctly, and retransmissions occur when simulated loss is introduced.
-	•	Logging shows sequence numbers, ACKs, and timing data.
-	•	The network environment behaves like a real captive Wi-Fi: users can connect but have no normal Internet access.
+	•	The client can retrieve a simple HTML file (2-5 KB) over DNS with full integrity.
+	•	Packets are ordered correctly using the alternating bit protocol.
+	•	Retransmissions occur automatically when simulated packet loss is introduced (5-10%).
+	•	Logging clearly shows sequence numbers (0/1), ACKs, timeouts, and retransmissions.
+	•	The network environment behaves like a real captive Wi-Fi: users can connect to Pi but cannot access any service except DNS to our dorm server.
+	•	Checksum validation detects and rejects corrupted packets (can be tested by manually corrupting data).
 
 ⸻
 
-6. Plan for development and testing
+6. Plan for development and testing (2-week timeline)
 
-Week 1–2: Set up Raspberry Pi AP and firewall; confirm only DNS is allowed.
-Week 3: Write minimal DNS tunnel server on dorm machine; implement client handshake.
-Week 4: Add reliability features (ACKs, timeouts, retransmissions).
-Week 5: Integrate simple web fetch: server retrieves a fixed HTML page and returns via tunnel.
-Week 6: Test under packet loss and record results; finalize report and demo.
+Days 1-3 (Pi Network Setup):
+	•	Configure Raspberry Pi as AP using hostapd and dnsmasq.
+	•	Set up iptables to allow only DNS to dorm server IP, block everything else.
+	•	Test: client connects to Pi Wi-Fi but cannot ping/browse internet; DNS queries to dorm server succeed.
+
+Days 4-6 (Basic DNS Tunneling):
+	•	Implement DNS server on dorm machine using Python + dnslib library.
+	•	Implement basic client that encodes request in DNS query subdomain.
+	•	Server decodes query and responds with TXT record containing simple response.
+	•	Test: transfer a single text message without reliability features.
+
+Days 7-10 (Stop-and-Wait Protocol):
+	•	Add alternating sequence numbers (0/1) to client and server.
+	•	Implement ACK/NAK logic in TXT responses.
+	•	Add 2-second timeout and retransmit on client side.
+	•	Add CRC32 checksum to detect corruption.
+	•	Test: transfer small file with manual packet dropping to verify retransmissions.
+
+Days 11-12 (Integration & Testing):
+	•	Integrate with simple HTML page retrieval from local HTTP server or file.
+	•	Use tc netem to introduce 5-10% packet loss on Pi forwarding interface.
+	•	Run tests and collect logs showing retransmissions working correctly.
+	•	Verify file integrity with checksums.
+
+Days 13-14 (Documentation & Demo):
+	•	Finalize requirements.md and implementation.md documents.
+	•	Record 10-minute demo video showing: Pi setup, network restrictions, client connecting, file transfer with packet loss, logs showing retransmissions.
+	•	Prepare final presentation.
 
 ⸻
 
 7. Risks and constraints
 	•	We will not use university networks or real captive portals — all traffic stays within our own devices.
-	•	DNS message size limits (≈ 255 bytes per name) restrict throughput; this is acceptable for demonstration.
-	•	Real Internet DNS servers are not used — the dorm server acts as the authoritative nameserver for a test domain.
+	•	Dorm network policy: We need to verify that running a DNS server on port 53 is allowed. If blocked, we may need to run on a different port or use alternative setup.
+	•	DNS message size limits (63 bytes per label, 253 chars total domain name) restrict throughput to ~200 bytes per round-trip. Stop-and-Wait makes this even slower (~1 packet per RTT). This is acceptable for demonstration but not practical for real use.
+	•	Stop-and-Wait is intentionally slow (no pipelining) — this is pedagogically useful but means large files would take prohibitively long. We limit demo to 2-5 KB files.
+	•	Real Internet DNS servers are not used — the dorm server acts as the authoritative resolver for a test domain (tunnel.local).
 
 ⸻
 
 8. Deliverables
-	•	Requirements.md (this document)
-	•	Implementation.md with protocol details
-	•	Code: client, server, and AP setup scripts
-	•	Demo video: showing the Pi hotspot, client connecting, and HTML page retrieved through DNS
+	•	Requirements.md (this document) — submitted as PDF on Canvas
+	•	Implementation.md with detailed protocol specification, data structures, and API definitions
+	•	Code repository with:
+		○	tunnel_client.py — client implementation
+		○	tunnel_server.py — DNS server with Stop-and-Wait logic
+		○	pi_setup.sh — script to configure Raspberry Pi AP and firewall
+		○	test_scripts/ — scripts to introduce packet loss and run tests
+		○	README.md — setup and usage instructions
+	•	Demo video (10 minutes): showing Pi hotspot, firewall verification, client connecting, file transfer with packet loss, detailed logs showing sequence numbers and retransmissions
+	•	Final report PDF: updated requirements and lessons learned
 
 
