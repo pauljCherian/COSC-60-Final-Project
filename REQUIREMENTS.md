@@ -113,24 +113,22 @@ Days 13-14 (Documentation & Demo):
 ⸻
 
 7. Risks and constraints
-	*	We will not use university networks or real captive portals — all traffic stays within our own devices.
-	*	Dorm network policy: We need to verify that running a DNS server on port 53 is allowed. If blocked, we may need to run on a different port or use alternative setup.
+	*	Not using university networks or real captive portals — all traffic on our own devices
 	*	DNS message size limits (63 bytes per label, 253 chars total domain name) restrict throughput to ~200 bytes per round-trip. Stop-and-Wait makes this even slower (~1 packet per RTT). This is acceptable for demonstration but not practical for real use.
-	*	Stop-and-Wait is intentionally slow (no pipelining) — this is pedagogically useful but means large files would take prohibitively long. We limit demo to 2-5 KB files.
-	*	Real Internet DNS servers are not used — the dorm server acts as the authoritative resolver for a test domain (tunnel.local).
+	*	Stop-and-Wait verification is slow (no pipelining), so means large files would take prohibitively long. We will only demo getting 2-5 KB files.
 
 ⸻
 
-8. Deliverables
-	*	Requirements.md (this document) — submitted as PDF on Canvas
+1. Deliverables
+	*	Requirements.md 
 	*	Implementation.md with detailed protocol specification, data structures, and API definitions
 	*	Code repository with:
-		○	tunnel_client.py — client implementation
-		○	tunnel_server.py — DNS server with Stop-and-Wait logic
-		○	pi_setup.sh — script to configure Raspberry Pi AP and firewall
-		○	test_scripts/ — scripts to introduce packet loss and run tests
-		○	README.md — setup and usage instructions
-	*	Demo video (10 minutes): showing Pi hotspot, firewall verification, client connecting, file transfer with packet loss, detailed logs showing sequence numbers and retransmissions
-	•	Final report PDF: updated requirements and lessons learned
+		*	tunnel_client.py — client implementation
+		*	tunnel_server.py — DNS server with Stop-and-Wait logic
+		*	pi_setup.sh — script to configure Raspberry Pi AP and firewall
+		*	test_scripts/ — scripts to introduce packet loss and run tests
+		*	README.md — setup and usage instructions
+	*	Demo (10 minute vid): showing Pi hotspot, firewall verification, client connecting, file transfer with packet loss, detailed logs showing sequence numbers and retransmissions
+	*	Final report PDF: updated requirements and lessons learned
 
 
