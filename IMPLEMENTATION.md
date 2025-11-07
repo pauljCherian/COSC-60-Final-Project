@@ -26,8 +26,6 @@ tunnel_server.py  - All server code (main runner, DNS, Stop-and-Wait send techni
 
 ### `protocol.py` - Shared Protocol Utilities
 
-**Purpose:** All the encoding/decoding functions and constants that both client and server need.
-
 **MACROS:**
 ```python
 CHUNK_SIZE = 150          # Bytes per chunk
@@ -118,8 +116,6 @@ def calculate_checksum(data: bytes) -> str:
 
 ### `tunnel_client.py` - Client Implementation
 
-**Purpose:** Complete client - handles CL args, sends DNS queries, receives file chunks using Stop-and-Wait.
-
 **Usage:**
 ```bash
 python tunnel_client.py <filename> --server <DNS_SERVER_IP>
@@ -190,7 +186,6 @@ def send_initial_request(filename: str, session_id: str, server_ip: str) -> str:
 
 ### `tunnel_server.py` - Server Implementation
 
-**Purpose:** Complete server - listens for DNS queries, handles GET/ACK requests, sends file chunks using Stop-and-Wait.
 
 **Usage:**
 ```bash
@@ -203,7 +198,7 @@ python tunnel_server.py --port 53 --files-dir ./html_files
 active_sessions = {}  # {session_id: SendSession}
 
 class SendSession:
-    """Tracks state for one file transfer."""
+    """Tracks the state for a single file transfer."""
     session_id: str
     filename: str
     chunks: list[bytes]        # File split into CHUNK_SIZE pieces
@@ -217,16 +212,12 @@ class SendSession:
 ```python
 def main():
     """
-    Main entry point.
-
     Flow:
-        1. Parse command line args (port, files directory)
+        1. Parse CLI args 
         2. Start DNS server using dnslib
         3. Register query handler
         4. Start timeout checker thread
-        5. Run until Ctrl-C
-
-    Uses dnslib.DNSServer to handle DNS protocol details.
+        5. Run until person stops it with keyboard interrupt
     """
 ```
 
@@ -235,27 +226,6 @@ def main():
 def start_dns_server(port: int, files_dir: str):
     """
     Starts DNS server on specified port using dnslib.
-
-    Implementation approach:
-        from dnslib.server import DNSServer, BaseResolver
-        from dnslib import RR, QTYPE, TXT
-
-        class TunnelResolver(BaseResolver):
-            def resolve(self, request, handler):
-                qname = str(request.q.qname)  # e.g., "GET-index-html.abc123.tunnel.local"
-
-                # Handle query
-                txt_response = handle_query(qname, files_dir)
-
-                # Build DNS response with TXT record
-                reply = request.reply()
-                reply.add_answer(RR(qname, QTYPE.TXT, rdata=TXT(txt_response)))
-                return reply
-
-        server = DNSServer(TunnelResolver(), port=port, address='0.0.0.0')
-        server.start()
-
-    This abstracts away DNS packet parsing - dnslib handles it.
     """
 ```
 
@@ -271,14 +241,6 @@ def handle_query(query_string: str, files_dir: str) -> str:
 
     Returns:
         TXT record response string
-
-    Logic:
-        if query starts with "GET-":
-            return handle_get(query, files_dir)
-        elif query starts with "ACK-":
-            return handle_ack(query)
-        else:
-            return "ERROR|invalid_query"
     """
 ```
 
@@ -288,31 +250,8 @@ def handle_get(query: str, files_dir: str) -> str:
     """
     Handles initial GET request.
 
-    Algorithm:
-        1. Parse query to get filename and session_id
-        2. Check if session already exists:
-            - If yes: reset it (client retrying)
-        3. Read file from files_dir/filename
-        4. Split into chunks of CHUNK_SIZE bytes
-        5. Create SendSession:
-            session = SendSession(
-                session_id=session_id,
-                filename=filename,
-                chunks=chunks,
-                current_chunk_idx=0,
-                current_seq=0,
-                last_sent_time=time.time(),
-                retransmit_count=0
-            )
-        6. Store in active_sessions[session_id]
-        7. Return first chunk with seq=0
-
     Returns:
         TXT record: "0|<base64_data>|<checksum>"
-
-    Error handling:
-        - File not found: return "ERROR|file_not_found"
-        - File too large: still transfer it (might take a while)
     """
 ```
 
@@ -322,66 +261,8 @@ def handle_ack(query: str) -> str:
     """
     Handles ACK from client (Stop-and-Wait logic).
 
-    Algorithm:
-        1. Parse ACK to get seq and session_id
-        2. Look up session in active_sessions
-        3. If session not found:
-            return "ERROR|invalid_session" (stale ACK)
-
-        4. If seq == session.current_seq (expected ACK):
-            # Good ACK - move to next chunk
-            session.retransmit_count = 0
-            session.current_chunk_idx += 1
-            session.current_seq = 1 - session.current_seq  # Toggle
-
-            if session.current_chunk_idx < len(session.chunks):
-                # More chunks to send
-                chunk_data = session.chunks[session.current_chunk_idx]
-                checksum = calculate_checksum(chunk_data)
-                session.last_sent_time = time.time()
-                return encode_chunk(chunk_data, session.current_seq, checksum)
-            else:
-                # All done - send DONE chunk
-                last_chunk = session.chunks[-1]
-                checksum = calculate_checksum(last_chunk)
-                del active_sessions[session_id]  # Cleanup
-                return encode_chunk(last_chunk, "DONE", checksum)
-
-        else:
-            # Duplicate or wrong ACK - re-send current chunk
-            chunk_data = session.chunks[session.current_chunk_idx]
-            checksum = calculate_checksum(chunk_data)
-            session.last_sent_time = time.time()
-            return encode_chunk(chunk_data, session.current_seq, checksum)
-
     Returns:
         TXT record with next chunk (or current if duplicate ACK)
-    """
-```
-
-**Timeout Handler:**
-```python
-def check_timeouts():
-    """
-    Background thread that checks for timed-out sessions.
-    Runs every 0.5 seconds.
-
-    For each active session:
-        if (time.time() - session.last_sent_time) > TIMEOUT_SERVER:
-            session.retransmit_count += 1
-
-            if session.retransmit_count > MAX_RETRIES:
-                print(f"Session {session_id} timed out, giving up")
-                del active_sessions[session_id]
-            else:
-                print(f"Timeout on session {session_id}, would retransmit...")
-                # Note: We can't actually retransmit from here because
-                # DNS is request-response. We just wait for client to
-                # re-send ACK (which it will after its timeout).
-                # Just track that timeout occurred for logging.
-
-    This is mainly for cleanup and logging. The actual retransmits happen
-    when client re-sends ACK after timeout.
     """
 ```
 
@@ -395,6 +276,7 @@ def check_timeouts():
 
 ## 3. DNS Packet Format Specification
 
+# NOTE: Used ChatGPT to generate these examples according to our functions above
 ### GET Request (Client -> Server)
 ```
 DNS Query:
@@ -403,28 +285,12 @@ DNS Query:
 
 Example:
   GET-index-html.abc123.tunnel.local
-
-Filename encoding:
-  - Remove leading slash if present
-  - Replace dots with dashes (index.html -> index-html)
-  - Replace other special chars with dashes
-  - Convert to lowercase
-
-Session ID:
-  - 6 random alphanumeric characters
-  - Generated by client
-  - Used to match requests/responses
 ```
 
 ### Data Chunk Response (Server -> Client)
 ```
 DNS Response:
   TXT Record: "<seq>|<base64_data>|<checksum>"
-
-Fields:
-  seq: "0" or "1" (single character)
-  base64_data: Base64-encoded chunk (max ~150 bytes before encoding)
-  checksum: 8-character hex string (CRC32 of raw data bytes)
 
 Example:
   "0|SGVsbG8gV29ybGQh|9b8e7f3a"
@@ -438,9 +304,6 @@ Decoded:
 ### Last Chunk Response (Server -> Client)
 ```
 TXT Record: "DONE|<base64_data>|<checksum>"
-
-Same format as data chunk, but seq is replaced with "DONE" literal string.
-This signals to client that transfer is complete.
 
 Example:
   "DONE|RW5kIG9mIGZpbGU=|a1b2c3d4"
@@ -471,118 +334,4 @@ Examples:
 
 Client should print error and exit.
 ```
-
----
-
-## 4. Stop-and-Wait States
-
-### Client States
-
-```
-States:
-  IDLE
-  WAITING_FOR_FIRST_CHUNK (sent GET, waiting)
-  RECEIVING (receiving chunks with Stop-and-Wait)
-  DONE
-
-Transitions:
-  IDLE -> WAITING_FOR_FIRST_CHUNK
-    Trigger: User runs tunnel_client.py
-    Action: Send GET request, start timeout timer
-
-  WAITING_FOR_FIRST_CHUNK -> RECEIVING
-    Trigger: Receive first chunk (seq=0)
-    Action: Validate checksum, send ACK-0, set expected_seq=1
-
-  WAITING_FOR_FIRST_CHUNK -> IDLE
-    Trigger: Timeout (5 seconds)
-    Action: Retry GET request, or fail after 3 retries
-
-  RECEIVING -> RECEIVING
-    Trigger: Receive chunk with expected seq
-    Action: Validate checksum, append data, send ACK, toggle expected_seq
-
-  RECEIVING -> RECEIVING (duplicate)
-    Trigger: Receive chunk with wrong seq
-    Action: Ignore data, re-send ACK for that seq
-
-  RECEIVING -> DONE
-    Trigger: Receive chunk with DONE flag
-    Action: Send final ACK, write file to disk
-
-Variables:
-  expected_seq: int (0 or 1)
-  chunks_received: list[bytes]
-```
-
-### Server State Machine
-
-```
-States (per session):
-  IDLE (no session)
-  SENDING_CHUNK_0 (sent chunk with seq=0, waiting for ACK-0)
-  SENDING_CHUNK_1 (sent chunk with seq=1, waiting for ACK-1)
-  DONE
-
-Transitions:
-  IDLE -> SENDING_CHUNK_0
-    Trigger: Receive GET request
-    Action: Read file, split into chunks, send first chunk (seq=0), start timeout
-
-  SENDING_CHUNK_0 -> SENDING_CHUNK_1
-    Trigger: Receive ACK-0
-    Action: Send next chunk (seq=1), start timeout
-
-  SENDING_CHUNK_0 -> SENDING_CHUNK_0 (timeout)
-    Trigger: No ACK received within TIMEOUT_SERVER seconds
-    Action: Wait for client to re-ACK (log timeout)
-
-  SENDING_CHUNK_1 -> SENDING_CHUNK_0
-    Trigger: Receive ACK-1
-    Action: Send next chunk (seq=0), start timeout
-
-  SENDING_CHUNK_1 -> SENDING_CHUNK_1 (timeout)
-    Trigger: No ACK received within TIMEOUT_SERVER seconds
-    Action: Wait for client to re-ACK (log timeout)
-
-  SENDING_CHUNK_0/1 -> DONE
-    Trigger: Receive ACK for last chunk (after sending DONE)
-    Action: Clean up session (delete from active_sessions)
-
-  Any state -> IDLE
-    Trigger: Too many timeouts (>5) or 60 seconds of inactivity
-    Action: Clean up session, log error
-
-Variables (per session):
-  current_seq: int (0 or 1)
-  current_chunk_idx: int
-  chunks: list[bytes]
-  last_sent_time: float
-  retransmit_count: int
-```
-
----
-
-## 5. Error Handling and Edge Cases
-
-### Client-side errors:
-1. **Timeout waiting for first chunk**: Retry GET request up to 3 times with same session_id
-2. **Timeout waiting for chunk**: Re-send last ACK (server might have missed it)
-3. **Checksum failure**: Ignore packet, don't send ACK, let server timeout and retransmit
-4. **Receive ERROR response**: Print error message and exit
-5. **Keyboard interrupt (Ctrl-C)**: Save partial file with .partial extension
-
-### Server-side errors:
-1. **File not found**: Return ERROR|file_not_found response
-2. **No ACK received (timeout)**: Log timeout, wait for client to retry
-3. **Invalid session_id in ACK**: Return ERROR|invalid_session
-4. **Malformed DNS query**: Log error, return ERROR|invalid_query
-5. **Too many timeouts (>5)**: Clean up session
-
-### Edge cases:
-1. **Client receives duplicate chunks**: Ignore data, re-send ACK
-2. **Server receives duplicate ACK**: Re-send current chunk (idempotent)
-3. **Session cleanup**: Remove from memory after transfer complete or 60 seconds of inactivity
-4. **Very small file (< CHUNK_SIZE)**: Send single chunk with DONE flag
-5. **Empty file**: Send DONE chunk with empty data
 
