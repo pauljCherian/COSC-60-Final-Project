@@ -6,14 +6,15 @@
 
 We're using a client/server architecture where all communication goes through DNS packets. We're making a client to send a GET requests as a DNS query. This will then be read by our custom DNS server which will then load the webpage, and then chunk it and use a stop-and-wait-protocol to send the chunks to the client which will then be read by the client as parts of the webpage.
 
+
 ### Data Flow:
 1. Client sends GET request as DNS query
 2. Server receives request, reads the specified file, and chunks it
 3. Server sends chunk 0 with seq=0 (sequence number) as DNS TXT response
 4. Client validates checksum on the packet from the server, if correct sends ACK-0 as DNS query back to server
 5. Server waits until it receives the ACK-0, then sends chunk 1 with seq=1
-6. This process continues until the server finishes sending all the packets. At which point it sends DONE message
-1. Client reassembles file and saves to disk
+6. This process continues until the server finishes sending all the packets. At which point it sends a DONE message
+7. Client reassembles file and saves to disk
 
 ### File Structure:
 ```
