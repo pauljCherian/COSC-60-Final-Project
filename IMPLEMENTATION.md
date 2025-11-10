@@ -208,7 +208,7 @@ def main():
     """
     Flow:
         1. Parse CLI args 
-        2. Start DNS server using dnslib
+        2. Start DNS server using dnslib package
         3. Register query handler
         4. Start timeout checker thread
         5. Run until person stops it with keyboard interrupt
@@ -268,7 +268,7 @@ def handle_ack(query: str) -> str:
 
 ## 3. DNS Packet Format Specification
 
-### NOTE: Used ChatGPT to generate these examples according to the documentation we wrote above.
+### NOTE: Used ChatGPT to generate these examples below according to the documentation we wrote above.
 ### GET Request (Client -> Server)
 ```
 DNS Query:
