@@ -26,9 +26,7 @@ tunnel_server.py - All server code (main runner, DNS, Stop-and-Wait send techniq
 
 ## 2. Module Specifications
 
-### `protocol.py` - Shared Protocol Utilities
-
-These constants define the protocol parameters and don't change during execution. 
+### `protocol.py` - Shared Protocol Utilities. Both the client and the sever to use these
 
 **Key Functions:**
 
@@ -75,7 +73,7 @@ def decode_request(query: str, expected: str) -> tuple[str|int, str]:
 
 def encode_chunk(data: bytes, seq: int|str, checksum: str) -> str:
     """
-    Encodes data chunk as TXT record string.
+    Encodes data chunk as TXT record string. Inverse of decode_chunk
 
     Args:
         data: bytes
@@ -88,7 +86,7 @@ def encode_chunk(data: bytes, seq: int|str, checksum: str) -> str:
 
 def decode_chunk(txt_record: str) -> tuple[int|str, bytes, str]:
     """
-    Parse a DNS TXT record response.
+    Parse a DNS TXT record response. Inverse of encode_chunk
 
     Args:
         txt_record: e.g., "[seq]|[data]|[checksum]"
@@ -99,7 +97,7 @@ def decode_chunk(txt_record: str) -> tuple[int|str, bytes, str]:
 
 def calculate_checksum(data: bytes) -> str:
     """
-    Calculates CRC32 checksum and returns as 8-char hex string.
+    Calculates the checksum and returns as a hex. 
 
     Args:
         data: bytes to checksum
@@ -109,8 +107,7 @@ def calculate_checksum(data: bytes) -> str:
     """
 ```
 
-### `tunnel_client.py` - Client Implementation
-
+### `tunnel_client.py` - Client Implementation. Client will run this code to request a webpage
 **Usage:**
 ```bash
 python tunnel_client.py <filename> --server <DNS_SERVER_IP>
@@ -121,12 +118,12 @@ python tunnel_client.py <filename> --server <DNS_SERVER_IP>
 def main():
     """
     Flow:
-        1. Parse command line args (filename, server IP)
-        2. Generate session ID
-        3. Send GET request
-        4. Receive file using Stop-and-Wait (receive_file function)
-        5. Write file to disk
-        6. Print stats (bytes received, time taken, retransmissions)
+        1. Parse commmand line
+        2. Generate session ID for this session
+        3. Send GET request to get a webpage
+        4. Call receive_file function to receive teh file with stop and wait method
+        5. After receiving all of the file, assemble it and write it to the disk
+        6. Print statistics (bytes received and time)
     """
 ```
 
@@ -145,7 +142,7 @@ def send_dns_query(query_string: str, server_ip: str, timeout: float = 5.0) -> s
     """
 ```
 
-**Stop-and-Wait Receive Logic:**
+**Stop-and-Wait Logic To Receive a file:**
 ```python
 def receive_file(session_id: str, server_ip: str) -> bytes:
     """
@@ -184,11 +181,13 @@ def send_initial_request(filename: str, session_id: str, server_ip: str) -> str:
 
 **Usage:**
 ```bash
-python tunnel_server.py --port 53 --files-dir ./html_files
+python tunnel_server.py --port 105 --files-dir ./html_files
 ```
 
 **Global State:**
 ```python
+# NOTE: ChatGPT reccomended that we create this dataclass to track the macros that
+# we need to set for a session 
 # Session storage
 active_sessions = {}  # {session_id: SendSession}
 
@@ -196,10 +195,10 @@ class SendSession:
     """Tracks the state for a single file transfer."""
     session_id: str
     filename: str
-    chunks: list[bytes]        # File split into CHUNK_SIZE pieces
-    current_chunk_idx: int     # Which chunk we're sending
-    current_seq: int           # 0 or 1
-    last_sent_time: float      # For timeout detection
+    chunks: list[bytes]       
+    current_chunk_idx: int     
+    current_seq: int           
+    last_sent_time: float      
     retransmit_count: int
 ```
 
@@ -262,16 +261,14 @@ def handle_ack(query: str) -> str:
 ```
 
 **Implementation notes:**
-- Using dnslib instead of writing DNS parsing from scratch
+- Using dnslib instead of writing DNS parsing from scratch.
 - Sessions stored in memory (lost if server crashes, but that's okay for now)
-- The server doesn't proactively retransmit - it waits for client to re-ACK
-- Timeout checker is mainly for cleanup and stats
+- The server doesn't proactively retransmi. Instead, waits for client to re-ACK
 
----
 
 ## 3. DNS Packet Format Specification
 
-# NOTE: Used ChatGPT to generate these examples according to our functions above
+### NOTE: Used ChatGPT to generate these examples according to the documentation we wrote above.
 ### GET Request (Client -> Server)
 ```
 DNS Query:
