@@ -4,49 +4,46 @@
 
 ## 1. System Architecture
 
-We're using a client/server architecture where all communication goes through DNS packets. We're making a client to send a GET requests as a DNS query. This will then be read by our custom DNS server which will then load the webpage, and then chunk it and use a stop-and-wait-protocol to send the chunks to the client which will then be read by the client as parts of the webpage.
+We're using a client/server architecture where all communication goes through DNS packets that we send from a client through a server that will only accept DNS formatted packets. The system consists of three components: a Raspberry Pi acting as a restricted Wi-Fi access point (only allows DNS), a client laptop, and a dorm server running a custom DNS server.
 
+The client sends a GET request as a DNS query through the Pi to our dorm server. The server loads the requested webpage, chunks it so that it'll fit into DNS, and uses Stop-and-Wait protocol (with an alternating bit flag to determine that we are sending the next packet) to reliably send the chunks back to the client, which reassembles them.
 
 ### Data Flow:
-1. Client sends GET request as DNS query
-2. Server receives request, reads the specified file, and chunks it
-3. Server sends chunk 0 with seq=0 (sequence number) as DNS TXT response
-4. Client validates checksum on the packet from the server, if correct sends ACK-0 as DNS query back to server
-5. Server waits until it receives the ACK-0, then sends chunk 1 with seq=1
-6. This process continues until the server finishes sending all the packets. At which point it sends a DONE message
-7. Client reassembles file and saves to disk
+1. Client sends http GET request as DNS query
+2. Server receives request, reads the specified file from its local file system, then and chunks it to send back to the user
+3. Server sends chunk 0 with seq=0 (sequence number) as DNS TXT response. 
+4. Client checks the checksum on the packet from the server (to make sure no corruption), if correct sends ACK-0 (where 0 is the seq number of the incoming packet) as DNS query back to server
+5. Custom server waits until it receives the ACK-0, then sends another chunk with seq=1. We only alternate to the next one AFTER receiving the ack-0
+6. Process continues until the server finishes sending all packets. After all the packets are sent we send a DONE packet
+7. Client then reassembles file and saves the webpage to the disk
 
 ### File Structure:
 ```
 protocol.py - Shared functions to encode / decode DNS messages
-tunnel_client.py - All client code (main runnner, DNS, Stop-and-Wait technique to receive)
-tunnel_server.py  - All server code (main runner, DNS, Stop-and-Wait send technique)
+tunnel_client.py - All client code (main runner, DNS, Stop-and-Wait technique to receive)
+tunnel_server.py - All server code (main runner, DNS, Stop-and-Wait send technique)
 ```
 
 ## 2. Module Specifications
 
 ### `protocol.py` - Shared Protocol Utilities
 
-**MACROS:**
-```python
-CHUNK_SIZE = 150          # Bytes per chunk
-TIMEOUT_SERVER = 2.5      # Server waits this long for ACK 
-TIMEOUT_CLIENT = 5.0      # Client waits this long for initial response
-TUNNEL_DOMAIN = "tunnel.local"
-SESSION_ID_LENGTH = 6
-MAX_RETRIES = 5           # Max retransmissions before giving up
-```
-These macros don't change. They are specified in advance for our protocol 
+These constants define the protocol parameters and don't change during execution. 
 
 **Key Functions:**
 
+
 ```python
-def encode_request(filename: str, session_id: str) -> str:
+# NOTE: ChatGPT helped format these functions into nicely typed and nicely docstringed python code with examples 
+# It also suggested we use '-' as character delimiters between a given chunk of our message and the 'tunnel.local' suffix to distinguish
+# between tunnelling queries for our DNS severe. It also generated example arguments for the parameters we pass in and the outputs we 
+# specified that we wanted to receive
+def encode_get(filename: str, session_id: str) -> str:
     """
-    Encodes a file request as DNS query string.
+    Encodes file request as DNS query string. Inverse of decode_request with expected = GET
     Args:
         filename: ex, "index.html"
-        session_id: 6 number string
+        session_id: 6 character alphanumeric string
 
     Returns:
         Formatted DNS query: ex. "GET-index-html.abc123.tunnel.local"
@@ -54,18 +51,18 @@ def encode_request(filename: str, session_id: str) -> str:
 
 def encode_ack(seq: int, session_id: str) -> str:
     """
-    Encode ACK as DNS query string.
+    Encode ACK as DNS query string. Inverse of decode_request with expected = ACK
 
     Args:
-        seq: 0,1,2,3,4,...
-        session_id: 6 number string
+        seq: 0 or 1 (alternating bit for Stop-and-Wait)
+        session_id: 6-char alphanumeric string
     Returns:
         ACK DNS query: ex. "ACK-0.abc123.tunnel.local"
     """
 
 def decode_request(query: str, expected: str) -> tuple[str|int, str]:
     """
-    Parses DNS request query (GET or ACK).
+    Parses DNS request query (GET or ACK). Inverse of encode_ack or encode_get
 
     Args:
         query: DNS query string (from above functions)
@@ -74,9 +71,6 @@ def decode_request(query: str, expected: str) -> tuple[str|int, str]:
     Returns:
         if expected="GET" => (filename, session_id)
         if expected="ACK" => (seq_num, session_id)
-
-    Raises:
-        ValueError if query doesn't match expected format
     """
 
 def encode_chunk(data: bytes, seq: int|str, checksum: str) -> str:
@@ -85,8 +79,8 @@ def encode_chunk(data: bytes, seq: int|str, checksum: str) -> str:
 
     Args:
         data: bytes
-        seq: 0, 1,2,3,... or "DONE"
-        checksum: 8 chars long
+        seq: 0, 1, or "DONE" (alternating bit for Stop-and-Wait protocol as we defined)
+        checksum: 8 charactres long
 
     Returns:
         TXT record: "[seq]|[data]|[checksum]"
@@ -94,7 +88,7 @@ def encode_chunk(data: bytes, seq: int|str, checksum: str) -> str:
 
 def decode_chunk(txt_record: str) -> tuple[int|str, bytes, str]:
     """
-    Parses TXT record response.
+    Parse a DNS TXT record response.
 
     Args:
         txt_record: e.g., "[seq]|[data]|[checksum]"
@@ -111,7 +105,7 @@ def calculate_checksum(data: bytes) -> str:
         data: bytes to checksum
 
     Returns:
-      the hex
+      the hex of the checksum
     """
 ```
 
@@ -157,9 +151,9 @@ def receive_file(session_id: str, server_ip: str) -> bytes:
     """
     Receives file chunks using Stop-and-Wait protocol.
 
-   Args: 
-      session_id: sesssion id of files we're transmitting 
-      server_ip: of the sever we are looking for 
+   Args:
+      session_id: session id of files we're transmitting
+      server_ip: of the server we are looking for 
 
     Returns:
         Complete file as bytes
