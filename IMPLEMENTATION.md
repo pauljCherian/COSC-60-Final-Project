@@ -4,13 +4,13 @@
 
 ## 1. System Architecture
 
-We're using a client/server architecture where all communication goes through DNS packets that we send from a client through a server that will only accept DNS formatted packets. The system consists of three components: a Raspberry Pi acting as a restricted Wi-Fi access point (only allows DNS), a client laptop, and a dorm server running a custom DNS server.
+We're using a client/server architecture where all communication goes through DNS packets that we send from a client through a server that will only accept DNS formatted packets. The system consists of three components: a Laptop AP acting as a restricted Wi-Fi access point (only allows DNS), a client laptop, and a dorm server running a custom DNS server.
 
-The client sends a GET request as a DNS query through the Pi to our dorm server. The server loads the requested webpage, chunks it so that it'll fit into DNS, and uses Stop-and-Wait protocol (with an alternating bit flag to determine that we are sending the next packet) to reliably send the chunks back to the client, which reassembles them.
+The client sends a GET request as a DNS query through the Laptop AP to our dorm server. The server loads the requested webpage, chunks it so that it'll fit into DNS, and uses Stop-and-Wait protocol (with an alternating bit flag to determine that we are sending the next packet) to reliably send the chunks back to the client, which reassembles them.
 
 ### Data Flow:
 1. Client sends http GET request as DNS query
-2. Server receives request, reads the specified file from its local file system, then and chunks it to send back to the user
+2. Server receives request, fetches the webpage through its own internet access/HTTPS, then chunks it to send back to the user
 3. Server sends chunk 0 with seq=0 (sequence number) as DNS TXT response. 
 4. Client checks the checksum on the packet from the server (to make sure no corruption), if correct sends ACK-0 (where 0 is the seq number of the incoming packet) as DNS query back to server
 5. Custom server waits until it receives the ACK-0, then sends another chunk with seq=1. We only alternate to the next one AFTER receiving the ack-0
@@ -25,6 +25,11 @@ tunnel_server.py - All server code (main runner, DNS, Stop-and-Wait send techniq
 ```
 
 ## 2. Module Specifications
+
+**Laptop AP Setup**
+
+We will use hostapad on Linux to launch our Access Point. We will set up an iptables rule to block all outgoing requests except for port 53 and forbid unsolicted DNS replies. Time permitting we redirect all DNS requests to our captive portal address.
+
 
 ### `protocol.py` - Shared Protocol Utilities. Both the client and the sever to use these
 
@@ -121,7 +126,7 @@ def main():
         1. Parse commmand line
         2. Generate session ID for this session
         3. Send GET request to get a webpage
-        4. Call receive_file function to receive teh file with stop and wait method
+        4. Call receive_file function to receive the file with stop and wait method
         5. After receiving all of the file, assemble it and write it to the disk
         6. Print statistics (bytes received and time)
     """
@@ -170,8 +175,9 @@ def send_initial_request(filename: str, session_id: str, server_ip: str) -> str:
 ```
 
 **Implementation notes:**
-- After sending GET, the first chunk comes back as the DNS response
+- After sending GET, the first chunk comes back as the DNS response.
 - After that, each ACK request gets the next chunk as its response
+- After all chunks are completed, the DNS server sends a FIN flag to end the connection.
 - We don't need a separate "wait for response" function - `send_dns_query` handles it and keeps track
 - Keep track of stats: bytes received, number of retransmissions detected (duplicate seq numbers)
 
@@ -217,7 +223,7 @@ def main():
 
 **DNS Server Setup:**
 ```python
-def start_dns_server(port: int, files_dir: str):
+def start_dns_server(port: int):
     """
     Starts DNS server on specified port using dnslib.
     """
@@ -225,13 +231,12 @@ def start_dns_server(port: int, files_dir: str):
 
 **Query Router:**
 ```python
-def handle_query(query_string: str, files_dir: str) -> str:
+def handle_query(query_string: str) -> str:
     """
     Routes incoming query to GET or ACK handler.
 
     Args:
         query_string: e.g., "GET-index-html.abc123.tunnel.local"
-        files_dir: where to find HTML files
 
     Returns:
         TXT record response string
@@ -240,9 +245,10 @@ def handle_query(query_string: str, files_dir: str) -> str:
 
 **GET Request Handler:**
 ```python
-def handle_get(query: str, files_dir: str) -> str:
+def handle_get(query: str) -> str:
     """
-    Handles initial GET request.
+    Handles initial GET request. Uses requests library to make appropriate request.
+    Chunks data and sends first packet.
 
     Returns:
         TXT record: "0|<base64_data>|<checksum>"
@@ -256,6 +262,7 @@ def handle_ack(query: str) -> str:
     Handles ACK from client (Stop-and-Wait logic).
 
     Returns:
+        if all chunks sent successfully then responds with just FIN in TXT record, otherwise:
         TXT record with next chunk (or current if duplicate ACK)
     """
 ```
@@ -263,7 +270,7 @@ def handle_ack(query: str) -> str:
 **Implementation notes:**
 - Using dnslib instead of writing DNS parsing from scratch.
 - Sessions stored in memory (lost if server crashes, but that's okay for now)
-- The server doesn't proactively retransmi. Instead, waits for client to re-ACK
+- The server doesn't proactively retransmit. Instead, waits for client to re-ACK. This is required because DNS blocks unsolicited replies.
 
 
 ## 3. DNS Packet Format Specification

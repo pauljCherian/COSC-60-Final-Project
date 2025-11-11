@@ -43,9 +43,8 @@ Our system has four main parts:
 	2.	Reliable data transfer using Stop-and-Wait technique and Custom protocol
 		*	We chose Stop-and-Wait because it's the simplest reliable protocol, and with only 2 weeks we need to keep the scope manageable. If we have extra time, we might try adding a sliding window/selective repeat.
 		*	The client sends a file request to the server (simple DNS query, doesn't need reliability).
-		*	The server fetches the file. Determines how many packets it needs for transport and conveys that to client through a start packet.
-			This is required because the DNS protocol forbids unsolicited DNS replies.
-		*	After the client recieves the initial number of chunks message from server, it sends a request for the first packet.
+		*	The server fetches the file. Chunks the file and sends the initial packet to the client.
+		*	After the client recieves the initial chunk, it sends an ACK - this serves as both acknowledgement and allows for the DNS server to reply with the second packet.
 			The server sends the file back in chunks using Stop-and-Wait:
 			*	Each chunk has an alternating sequence number (0 or 1) and a checksum.
 			*	The client sends back ACK-0 or ACK-1 after receiving each chunk.
