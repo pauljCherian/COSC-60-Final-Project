@@ -1,4 +1,4 @@
-# IMPLEMENTATION.md
+# IMPLEMENTATION.md - TEAM MEMBERS: NIRANJAN BASARAN, PAUL CHERIAN
 
 ## DNS Tunnel with Stop-and-Wait Protocol
 

@@ -1,4 +1,4 @@
-# REQUIREMENTS.md
+# REQUIREMENTS.md - TEAM MEMBERS: NIRANJAN BASARAN, PAUL CHERIAN
 ## 1. Project overview
 
 We are building a small experimental network that allows a laptop to access a remote website through DNS — even when all normal Internet traffic is blocked. This is known as DNS tunnelling as and is a common data exfiltration method. However, here we are using it as a covert method to access the internet.
