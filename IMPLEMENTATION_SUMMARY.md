@@ -16,5 +16,4 @@ Captive Network Simulation: Configure a rogue access point using hostapd and a n
 
 Timeout and Retransmission Logic: Implement both client-side and server-side timeout detection with configurable retry limits
 
-
---- Session Management: Handle multiple concurrent file transfer sessions with unique session IDs
+Session Management: Handle multiple concurrent file transfer sessions with unique session IDs
