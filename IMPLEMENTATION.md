@@ -83,7 +83,7 @@ def encode_chunk(data: bytes, seq: int|str, checksum: str) -> str:
     Args:
         data: bytes
         seq: 0, 1, or "DONE" (alternating bit for Stop-and-Wait protocol as we defined)
-        checksum: 8 charactres long
+        checksum: 4 characters long (16-bit Internet Checksum)
 
     Returns:
         TXT record: "[seq]|[data]|[checksum]"
@@ -102,13 +102,21 @@ def decode_chunk(txt_record: str) -> tuple[int|str, bytes, str]:
 
 def calculate_checksum(data: bytes) -> str:
     """
-    Calculates the checksum and returns as a hex. 
+    Calculates the Internet Checksum manually (same algorithm as TCP/UDP/IP from prior labs)
+    and returns as hex. We calculate this by hand instead of using a library like zlib's CRC32.
+
+    Algorithm:
+      1. Pad data to even length if needed
+      2. Sum all 16-bit words
+      3. Fold carry bits back into 16-bit result
+      4. Take one's complement
+      5. Format as 4-character hex string
 
     Args:
         data: bytes to checksum
 
     Returns:
-      the hex of the checksum
+      the hex of the checksum (4 characters for 16-bit checksum)
     """
 ```
 
@@ -292,12 +300,12 @@ DNS Response:
   TXT Record: "<seq>|<base64_data>|<checksum>"
 
 Example:
-  "0|SGVsbG8gV29ybGQh|9b8e7f3a"
+  "0|SGVsbG8gV29ybGQh|a996"
 
 Decoded:
   seq = 0
   data = b"Hello World!"
-  checksum = 0x9b8e7f3a (calculated from raw bytes, not base64)
+  checksum = 0xa996 (16-bit Internet Checksum calculated from raw bytes, not base64)
 ```
 
 ### Last Chunk Response (Server -> Client)
@@ -305,7 +313,7 @@ Decoded:
 TXT Record: "DONE|<base64_data>|<checksum>"
 
 Example:
-  "DONE|RW5kIG9mIGZpbGU=|a1b2c3d4"
+  "DONE|RW5kIG9mIGZpbGU=|b3c4"
 ```
 
 ### ACK Request (Client -> Server)
