@@ -216,6 +216,7 @@ def main():
 
         # FLOW #6. Print stats
         # NOTE: ChatGPT suggested I add trackers for these statistics and print them as such
+        # including the time
         elapsed_time = time.time() - start_time
         print(f"\nFile saved to: {output_filename}")
         print(f"File size: {len(file_data)} bytes")
