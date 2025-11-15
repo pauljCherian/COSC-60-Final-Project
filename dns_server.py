@@ -46,7 +46,15 @@ def create_dns_response(query_packet, src_addr):
 
         checksum = generate_checksum(answer) #answer in bytes rn
 
-        answer = protocol.encode_chunk(answer, id2seq[sessions[src_addr]], checksum)
+        # Determine sequence number: use "DONE" for last chunk, otherwise use alternating bit (0 or 1)
+        session_id = sessions[src_addr]
+        current_seq = id2seq[session_id]
+        if current_seq == len(id2data[session_id]) - 1:
+            seq_to_send = "DONE"
+        else:
+            seq_to_send = current_seq % 2
+
+        answer = protocol.encode_chunk(answer, seq_to_send, checksum)
 
         print(answer)
 
@@ -150,7 +158,7 @@ def handle_query(query_bytes: str, src_dst: str) -> str:
 
         seq = int(query_string[4])
 
-        
+
         _, session_id, tunnel, local, _  = query_string.split(".") #ACK-0 , seq is 5th car
         print(seq,id2seq[session_id])
         if seq == id2seq[session_id] % 2: #client acked the packet we sent!

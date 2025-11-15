@@ -17,7 +17,7 @@ def send_dns_query(query_string: str, server_ip: str, timeout: float = 5.0) -> b
     Returns:
         TXT record response string
     """
-
+    print(f'SENDING {query_string} to server {server_ip}')
     # Build DNS query packet
     dns_query = DNSQR(qname=query_string, qtype='TXT')
     packet = IP(dst = server_ip) / UDP(sport=random.randint(49152, 65535), dport=53) / DNS(rd=1,qd=dns_query)
@@ -139,6 +139,7 @@ def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> byt
                 duplicate_count += 1
                 
             # create the ack message and send it to the server so it knows we got it
+            assert seq_type
             ACK_message= protocol.encode_ack(seq_type, session_id)
             current_txt = send_dns_query(ACK_message, server_ip).decode()
 
