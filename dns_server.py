@@ -8,12 +8,13 @@ import socket
 import base64
 import requests
 import math
+import protocol
 from scapy.all import DNS, DNSQR, DNSRR
 
 # Configuration
 DNS_PORT = 53  # Standard DNS port (requires root privileges)
 LISTEN_IP = "0.0.0.0"  # Listen on all interfaces
-CHUNK_SIZE = 200
+CHUNK_SIZE = 150  # Reduced to fit in DNS TXT record (255 byte limit) after base64 encoding
 
 sessions = {}
 id2seq = {}
@@ -45,9 +46,10 @@ def create_dns_response(query_packet, src_addr):
 
         checksum = generate_checksum(answer) #answer in bytes rn
 
-        answer = str(id2seq[sessions[src_addr]]) + "|" + answer.decode() + "|" + str(checksum)
+        answer = protocol.encode_chunk(answer, id2seq[sessions[src_addr]], checksum)
 
         print(answer)
+
 
         # Create the response
         response = DNS(
@@ -70,7 +72,7 @@ def create_dns_response(query_packet, src_addr):
         return None
 
 
-def generate_checksum(data) -> bytes:
+def generate_checksum(data) -> str:
     print(data)
     if len(data) % 2 == 1:
         data = data + b'\x00'
@@ -79,8 +81,9 @@ def generate_checksum(data) -> bytes:
         sum = sum + ((data[i] << 8) + data[i+1])
         sum = (sum & 0xFFFF) + (sum >> 16)
     sum = (sum & 0xFFFF) + (sum >> 16)
-    print(hex(sum ^ 0xFFFF))
-    return hex(sum ^ 0xFFFF)
+    checksum = f"{(sum ^ 0xFFFF):04x}"
+    print(checksum)
+    return checksum
 
     
 
@@ -145,9 +148,7 @@ def handle_query(query_bytes: str, src_dst: str) -> str:
        return id2data[session_id][0]
     elif query_string.startswith("ACK"):
 
-        seq = query_string[4]  #ACK-0 , seq is 5th car
-
-        _, session_id, tunnel, local, _  = query_string.split(".") 
+        seq, session_id, tunnel, local, _  = query_string[5].split(".") #ACK-0 , seq is 5th car
 
         if seq == id2seq[session_id] % 2: #client acked the packet we sent!
             id2seq[session_id] += id2seq[session_id] #increment sequence number & send the next data chunk
