@@ -3,7 +3,7 @@ import random
 import string
 import time
 import protocol
-from scapy import *
+from scapy.all import IP, DNSQR, UDP, DNS, sr1
 
 def send_dns_query(query_string: str, server_ip: str, timeout: float = 5.0) -> str:
     """
@@ -51,7 +51,8 @@ def send_dns_query(query_string: str, server_ip: str, timeout: float = 5.0) -> s
             if isinstance(answer.rdata, bytes):
                 txt_data = answer.rdata.decode('utf-8')
             else: 
-                txt_data = answer.rdata
+                txt_data = answer.rdata[0]
+                print(txt_data)
             return txt_data
 
     raise ValueError("No TXT record found in DNS response")
@@ -100,9 +101,12 @@ def receive_file(first_chunk_txt: str, session_id: str, server_ip: str) -> bytes
 
     # first chunk we call the function ith
     expected_seq_type = 0
-    current_txt = first_chunk_txt
+    current_txt = first_chunk_txt.decode()
+
+    print(current_txt)
 
     # loop while receiving packets
+    #TODO: Are we checking for session id anywhere?
     while True:
         # decode current chunk with protocol
         seq_type, data_bytes, packet_checksum = protocol.decode_chunk(current_txt)
@@ -127,7 +131,7 @@ def receive_file(first_chunk_txt: str, session_id: str, server_ip: str) -> bytes
                 chunks.append(data_bytes)
                 total_bytes += len(data_bytes)
                 # toggle seq_type from 0->1 or 1->0
-                expected_seq_type = 1 - expected_seq_type
+                expected_seq_type = 1 - expected_seq_type #NOTE does this work the way we want?
 
             else:
                 # if seq_type is the same, we received duplicate chunk so increment duplicate
@@ -178,7 +182,7 @@ def main():
     args = parser.parse_args()
 
     filename = args.filename
-    server_ip = args.server
+    server_ip = args.server # 172.25.162.183
 
     # FLow #2. Create the session ID for this file transfer session
     # NOTE: ChatGPT 
