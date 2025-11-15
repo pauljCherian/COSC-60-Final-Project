@@ -5,7 +5,7 @@ import time
 import protocol
 from scapy.all import IP, DNSQR, UDP, DNS, sr1
 
-def send_dns_query(query_string: str, server_ip: str, timeout: float = 5.0) -> str:
+def send_dns_query(query_string: str, server_ip: str, timeout: float = 5.0) -> bytes:
     """
     Sends DNS TXT query and waits for response.
 
@@ -45,20 +45,18 @@ def send_dns_query(query_string: str, server_ip: str, timeout: float = 5.0) -> s
         # Get the answer
         answer = dns_response.an[i]
         # Check if type is 16 => TXT record
-        if answer.type == 16:  
-            # Index into rdata field
-            txt_data = None
+        if answer.type == 16:
+            # Index into rdata field - return as bytes
             if isinstance(answer.rdata, bytes):
-                txt_data = answer.rdata.decode('utf-8')
-            else: 
-                txt_data = answer.rdata[0]
-                print(txt_data)
-            return txt_data
+                return answer.rdata
+            else:
+                # rdata is a list, get first element and encode to bytes
+                return answer.rdata[0].encode('utf-8') if isinstance(answer.rdata[0], str) else answer.rdata[0]
 
     raise ValueError("No TXT record found in DNS response")
 
 
-def send_initial_request(filename: str, session_id: str, server_ip: str) -> str:
+def send_initial_request(filename: str, session_id: str, server_ip: str) -> bytes:
     """
     Sends GET request and waits for first chunk to be sent back.
 
@@ -80,7 +78,7 @@ def send_initial_request(filename: str, session_id: str, server_ip: str) -> str:
     return response
 
 
-def receive_file(first_chunk_txt: str, session_id: str, server_ip: str) -> bytes:
+def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> bytes:
     """
     Receives file chunks using Stop-and-Wait protocol.
 
@@ -142,7 +140,7 @@ def receive_file(first_chunk_txt: str, session_id: str, server_ip: str) -> bytes
                 
             # create the ack message and send it to the server so it knows we got it
             ACK_message= protocol.encode_ack(seq_type, session_id)
-            current_txt = send_dns_query(ACK_message, server_ip)
+            current_txt = send_dns_query(ACK_message, server_ip).decode()
 
         else:
             # Checksum does not match => data corrupted
@@ -151,7 +149,7 @@ def receive_file(first_chunk_txt: str, session_id: str, server_ip: str) -> bytes
             # Request retransmit by sending ACK for the sequence we're expecting
             # This tells server "I'm still waiting for seq X, please resend"
             retry_ack = protocol.encode_ack(expected_seq_type, session_id)
-            current_txt = send_dns_query(retry_ack, server_ip)
+            current_txt = send_dns_query(retry_ack, server_ip).decode()
             continue
 
     # Print statistics
