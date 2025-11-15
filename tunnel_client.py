@@ -139,7 +139,7 @@ def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> byt
                 duplicate_count += 1
                 
             # create the ack message and send it to the server so it knows we got it
-            assert seq_type
+
             ACK_message= protocol.encode_ack(seq_type, session_id)
             current_txt = send_dns_query(ACK_message, server_ip).decode()
 
