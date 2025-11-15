@@ -155,7 +155,7 @@ def handle_query(query_bytes: str, src_dst: str) -> str:
         print(seq,id2seq[session_id])
 
         if seq == id2seq[session_id] % 2: #client acked the packet we sent!
-
+            print(len(id2data[session_id]))
             if id2seq[session_id] == len(id2data[session_id]) - 1: #Send DONE on last packet
                 return id2data[session_id][id2seq[session_id]+1], "DONE"
 
