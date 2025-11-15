@@ -42,17 +42,9 @@ def create_dns_response(query_packet, src_addr):
 
         print(f"Decoded payload: {qname}")
 
-        answer = handle_query(qname, src_addr)
+        answer, seq_to_send = handle_query(qname, src_addr)
 
         checksum = generate_checksum(answer) #answer in bytes rn
-
-        # Determine sequence number: use "DONE" for last chunk, otherwise use alternating bit (0 or 1)
-        session_id = sessions[src_addr]
-        current_seq = id2seq[session_id]
-        if current_seq == len(id2data[session_id]) - 1:
-            seq_to_send = "DONE"
-        else:
-            seq_to_send = current_seq % 2
 
         answer = protocol.encode_chunk(answer, seq_to_send, checksum)
 
@@ -153,7 +145,7 @@ def handle_query(query_bytes: str, src_dst: str) -> str:
 
        print(id2data)
 
-       return id2data[session_id][0]
+       return id2data[session_id][0], 0
     elif query_string.startswith("ACK"):
 
         seq = int(query_string[4])
@@ -161,11 +153,17 @@ def handle_query(query_bytes: str, src_dst: str) -> str:
 
         _, session_id, tunnel, local, _  = query_string.split(".") #ACK-0 , seq is 5th car
         print(seq,id2seq[session_id])
+
         if seq == id2seq[session_id] % 2: #client acked the packet we sent!
+
+            if id2seq[session_id] == len(id2data[session_id]) - 1: #Send DONE on last packet
+                return id2data[session_id][id2seq[session_id]+1], "DONE"
+
             id2seq[session_id] += 1 #increment sequence number & send the next data chunk
-        #NOTE: doesnt handle fringe cases where ACK is some weird number not 0 or 1
+        
         print(seq,id2seq[session_id])
-        return id2data[session_id][id2seq[session_id]]
+
+        return id2data[session_id][id2seq[session_id]], id2seq[session_id] % 2
 
     else:
         print("Unknown flag", query_string[:3])
