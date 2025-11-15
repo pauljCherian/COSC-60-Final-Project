@@ -154,7 +154,7 @@ def handle_query(query_bytes: str, src_dst: str) -> str:
         _, session_id, tunnel, local, _  = query_string.split(".") #ACK-0 , seq is 5th car
         print(seq,id2seq[session_id])
         if seq == id2seq[session_id] % 2: #client acked the packet we sent!
-            id2seq[session_id] += id2seq[session_id] #increment sequence number & send the next data chunk
+            id2seq[session_id] += 1 #increment sequence number & send the next data chunk
         #NOTE: doesnt handle fringe cases where ACK is some weird number not 0 or 1
         print(seq,id2seq[session_id])
         return id2data[session_id][id2seq[session_id]]
