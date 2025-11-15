@@ -109,6 +109,7 @@ def receive_file(first_chunk_txt: str, session_id: str, server_ip: str) -> bytes
     #TODO: Are we checking for session id anywhere?
     while True:
         # decode current chunk with protocol
+        
         seq_type, data_bytes, packet_checksum = protocol.decode_chunk(current_txt)
         # calculate checksum
         checksum = protocol.calculate_checksum(data_bytes)

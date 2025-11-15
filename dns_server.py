@@ -14,7 +14,7 @@ from scapy.all import DNS, DNSQR, DNSRR
 # Configuration
 DNS_PORT = 53  # Standard DNS port (requires root privileges)
 LISTEN_IP = "0.0.0.0"  # Listen on all interfaces
-CHUNK_SIZE = 200
+CHUNK_SIZE = 150  # Reduced to fit in DNS TXT record (255 byte limit) after base64 encoding
 
 sessions = {}
 id2seq = {}
