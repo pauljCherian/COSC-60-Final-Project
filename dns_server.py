@@ -8,6 +8,7 @@ import socket
 import base64
 import requests
 import math
+import protocol
 from scapy.all import DNS, DNSQR, DNSRR
 
 # Configuration
@@ -45,7 +46,7 @@ def create_dns_response(query_packet, src_addr):
 
         checksum = generate_checksum(answer) #answer in bytes rn
 
-        answer = str(id2seq[sessions[src_addr]]) + "|" + answer.decode() + "|" + str(checksum)
+        answer = protocol.encode_chunk(answer, id2seq[sessions[src_addr]], checksum)
 
         print(answer)
 
@@ -71,7 +72,7 @@ def create_dns_response(query_packet, src_addr):
         return None
 
 
-def generate_checksum(data) -> bytes:
+def generate_checksum(data) -> str:
     print(data)
     if len(data) % 2 == 1:
         data = data + b'\x00'
