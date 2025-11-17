@@ -44,7 +44,7 @@ def create_dns_response(query_packet, src_addr):
 
         answer, seq_to_send = handle_query(qname, src_addr)
 
-        checksum = generate_checksum(answer) #answer in bytes rn
+        checksum = protocol.calculate_checksum(answer) #answer in bytes rn
 
         answer = protocol.encode_chunk(answer, seq_to_send, checksum)
 
@@ -69,19 +69,6 @@ def create_dns_response(query_packet, src_addr):
     except Exception as e:
         print(f"Error creating DNS response: {e}")
         return None
-
-def generate_checksum(data) -> str:
-    print(data)
-    if len(data) % 2 == 1:
-        data = data + b'\x00'
-    sum = 0x0000
-    for i in range(0, len(data), 2):
-        sum = sum + ((data[i] << 8) + data[i+1])
-        sum = (sum & 0xFFFF) + (sum >> 16)
-    sum = (sum & 0xFFFF) + (sum >> 16)
-    checksum = f"{(sum ^ 0xFFFF):04x}"
-    print(checksum)
-    return checksum
 
 def handle_get(query: str) -> str:
     """
@@ -136,7 +123,6 @@ def handle_query(query_bytes: str, src_dst: str) -> str:
 
        id2seq[session_id] = 0
 
-
        id2data[session_id] = handle_get(query.replace("-", "."))
 
        print(id2data)
@@ -146,7 +132,6 @@ def handle_query(query_bytes: str, src_dst: str) -> str:
     elif query_string.startswith("ACK"):
 
         seq = int(query_string[4])
-
 
         _, session_id, tunnel, local, _  = query_string.split(".") #ACK-0 , seq is 5th car
         print(seq,id2seq[session_id])
