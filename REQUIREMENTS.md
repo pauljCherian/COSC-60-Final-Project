@@ -110,6 +110,7 @@ Our system has four main parts:
 - The exact DNS encoding format and packet structure will be determined during Week 1 prototyping.
 
 
+w 
 ## 8. Deliverables
 - **Requirements.md** (this document)
 - **Implementation.md** with detailed protocol specification, data structures, and function designs

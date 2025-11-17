@@ -2,8 +2,55 @@ import argparse
 import random
 import string
 import time
+import os
 import protocol
 from scapy.all import IP, DNSQR, UDP, DNS, sr1
+
+
+# MACROS for testing. I wanted to directly simulate what happens if you drop or corrupt 
+# a packet. This is an integration test with the entire network. If TEST_MODE is true
+# Then we may alter the packet sent from the client
+# TEST_DROP_RATE is the rate of dropped packets
+# TEST_CORRUPT_RATE is the rate of corrupted packets
+# NOTE: ChatGPT told me how to pull .env varaibles
+TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
+TEST_DROP_RATE = float(os.getenv('TEST_DROP_RATE', '0.0'))
+TEST_CORRUPT_RATE = float(os.getenv('TEST_CORRUPT_RATE', '0.0'))
+
+# Statistics for test mode
+test_stats = {
+    'packets_received': 0,
+    'packets_dropped': 0,
+    'packets_corrupted': 0
+}
+
+def _simulate_network_conditions(packet: bytes) -> bytes:
+    # Simulates outbound packet, returns None if dropped, or corrupts it
+    # and returns the corrupted packet
+    # make sure we're testing mode
+    if not TEST_MODE:
+        return packet
+    # Increment statistics
+    test_stats['packets_received'] += 1
+    # Simulate packet drop
+    if random.random() < TEST_DROP_RATE:
+        test_stats['packets_dropped'] += 1
+        raise TimeoutError("TEST MODE: Simulated packet drop")
+    # Simulate packet corruption
+    if random.random() < TEST_CORRUPT_RATE:
+        test_stats['packets_corrupted'] += 1
+        # flip a byte to corrupt. NOTE: ChatGPT told me how to corrupt a byte from what 
+        # we are sending over the network
+        packet_array = bytearray(packet)
+        if len(packet_array) > 0:
+            idx = random.randint(0, len(packet_array) - 1)
+            # This flips every bit in the byte
+            packet_array[idx] ^= 0xFF 
+        # return the corrupted packet
+        return bytes(packet_array)
+
+    # return unaltered packet
+    return packet
 
 def send_dns_query(query_string: str, server_ip: str, timeout: float = 5.0) -> bytes:
     """
@@ -48,10 +95,17 @@ def send_dns_query(query_string: str, server_ip: str, timeout: float = 5.0) -> b
         if answer.type == 16:
             # Index into rdata field - return as bytes
             if isinstance(answer.rdata, bytes):
-                return answer.rdata
+                # we store this in a result variable
+                result = answer.rdata
             else:
                 # rdata is a list, get first element and encode to bytes
-                return answer.rdata[0].encode('utf-8') if isinstance(answer.rdata[0], str) else answer.rdata[0]
+                # store in result variable
+                result = answer.rdata[0].encode('utf-8') if isinstance(answer.rdata[0], str) else answer.rdata[0]
+
+            # before returning what we are going to send over the network, we need to simulate 
+            # either corrupting part of the result OR dropping it entirely. INsert our 
+            # in the middle helper function here
+            return _simulate_network_conditions(result)
 
     raise ValueError("No TXT record found in DNS response")
 
@@ -68,14 +122,28 @@ def send_initial_request(filename: str, session_id: str, server_ip: str) -> byte
     Returns:
         First TXT record response
     """
-    # Use protocol function to create GETquery with filename and session id 
+    # Use protocol function to create GETquery with filename and session id
     GET_query = protocol.encode_get(filename, session_id)
 
-    # send the GET query and wait for the sever response
-    # Uses the send DNS query function we just made
-    response = send_dns_query(GET_query, server_ip)
+    # Retry loop for initial request (in case first packet is dropped/corrupted)
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = send_dns_query(GET_query, server_ip)
+            return response
+        except TimeoutError as e:
+            if "TEST MODE" in str(e):
+                # Simulated drop - retry
+                if attempt < max_retries - 1:
+                    continue
+            raise  # Real timeout or max retries exceeded
+        except UnicodeDecodeError:
+            # Corruption made invalid UTF-8 - retry
+            if attempt < max_retries - 1:
+                continue
+            raise  # Max retries exceeded
 
-    return response
+    raise TimeoutError("Failed to get initial response after retries")
 
 
 def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> bytes:
@@ -99,7 +167,12 @@ def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> byt
 
     # first chunk we call the function ith
     expected_seq_type = 0
-    current_txt = first_chunk_txt.decode()
+    try:
+        current_txt = first_chunk_txt.decode()
+    except UnicodeDecodeError:
+        # Corruption made invalid UTF-8 - treat as corrupted packet
+        print("First chunk corrupted (invalid UTF-8) - this test is too extreme!")
+        raise ValueError("First chunk corrupted - try lower corruption rate")
 
     print(current_txt)
 
@@ -139,9 +212,26 @@ def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> byt
                 duplicate_count += 1
                 
             # create the ack message and send it to the server so it knows we got it
-
             ACK_message= protocol.encode_ack(seq_type, session_id)
-            current_txt = send_dns_query(ACK_message, server_ip).decode()
+
+            # try to send the message several times
+            max_attempted = 5
+            for attempt in range(max_attempted):
+                try:
+                    current_txt = send_dns_query(ACK_message, server_ip).decode()
+                    break
+
+                except TimeoutError as e:
+                    # If we're in testing mode we know that timeoutError is immediate
+                    if "TEST MODE" in str(e):
+                        if attempt < max_attempted - 1:
+                            continue
+                    raise  # Real timeout or max retries exceeded
+                except UnicodeDecodeError:
+                    # Corruption made invalid UTF-8 - treat as corrupted, retry
+                    if attempt < max_attempted - 1:
+                        continue
+                    raise  # Max retries exceeded
 
         else:
             # Checksum does not match => data corrupted
@@ -150,7 +240,24 @@ def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> byt
             # Request retransmit by sending ACK for the sequence we're expecting
             # This tells server "I'm still waiting for seq X, please resend"
             retry_ack = protocol.encode_ack(expected_seq_type, session_id)
-            current_txt = send_dns_query(retry_ack, server_ip).decode()
+
+            # Retry loop for dropped packets
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    current_txt = send_dns_query(retry_ack, server_ip).decode()
+                    break  # Success! Exit retry loop
+                except TimeoutError as e:
+                    if "TEST MODE" in str(e):
+                        # Simulated drop - retry immediately
+                        if attempt < max_retries - 1:
+                            continue
+                    raise  # Real timeout or max retries exceeded
+                except UnicodeDecodeError:
+                    # Corruption made invalid UTF-8 - treat as corrupted, retry
+                    if attempt < max_retries - 1:
+                        continue
+                    raise  # Max retries exceeded
             continue
 
     # Print statistics
@@ -226,6 +333,20 @@ def main():
         print(f"File size: {len(file_data)} bytes")
         print(f"Transfer time: {elapsed_time:.2f} seconds")
         print(f"Throughput: {len(file_data) / elapsed_time:.2f} bytes/sec")
+
+        # Print test mode statistics if enabled
+        # NOTE: I had ChatGPT insert these counters to print if were are in test mode
+        # and write the below print statements to actually print them
+        if TEST_MODE:
+            print(f"\n=== TEST MODE STATISTICS ===")
+            print(f"Packets received from server: {test_stats['packets_received']}")
+            print(f"Packets dropped (simulated): {test_stats['packets_dropped']}")
+            print(f"Packets corrupted (simulated): {test_stats['packets_corrupted']}")
+            if test_stats['packets_received'] > 0:
+                drop_rate = test_stats['packets_dropped'] / test_stats['packets_received']
+                corrupt_rate = test_stats['packets_corrupted'] / test_stats['packets_received']
+                print(f"Actual drop rate: {drop_rate:.1%}")
+                print(f"Actual corrupt rate: {corrupt_rate:.1%}")
 
     # Fall back for errors
     except Exception as e:
