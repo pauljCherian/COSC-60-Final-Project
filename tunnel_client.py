@@ -126,7 +126,7 @@ def send_initial_request(filename: str, session_id: str, server_ip: str) -> byte
     GET_query = protocol.encode_get(filename, session_id)
 
     # Retry loop for initial request (in case first packet is dropped/corrupted)
-    max_retries = 5
+    max_retries = 10  # Higher for testing with packet loss
     for attempt in range(max_retries):
         try:
             response = send_dns_query(GET_query, server_ip)
@@ -215,7 +215,7 @@ def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> byt
             ACK_message= protocol.encode_ack(seq_type, session_id)
 
             # try to send the message several times
-            max_attempted = 5
+            max_attempted = 10  # Higher for testing with packet loss
             for attempt in range(max_attempted):
                 try:
                     current_txt = send_dns_query(ACK_message, server_ip).decode()
@@ -242,7 +242,7 @@ def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> byt
             retry_ack = protocol.encode_ack(expected_seq_type, session_id)
 
             # Retry loop for dropped packets
-            max_retries = 5
+            max_retries = 10  # Higher for testing with packet loss
             for attempt in range(max_retries):
                 try:
                     current_txt = send_dns_query(retry_ack, server_ip).decode()
