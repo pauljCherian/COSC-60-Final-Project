@@ -24,7 +24,10 @@ test_stats = {
     'packets_corrupted': 0
 }
 
-def _simulate_network_conditions(packet: bytes) -> bytes:
+# this is our helper function to corrupt a packet before the client then processes it
+# This is simulating either packet dropping or packet corruption. We insert it on inbound 
+# traffic to the client from the server
+def simulate_network_conditions(packet: bytes) -> bytes:
     # Simulates outbound packet, returns None if dropped, or corrupts it
     # and returns the corrupted packet
     # make sure we're testing mode
@@ -102,10 +105,10 @@ def send_dns_query(query_string: str, server_ip: str, timeout: float = 5.0) -> b
                 # store in result variable
                 result = answer.rdata[0].encode('utf-8') if isinstance(answer.rdata[0], str) else answer.rdata[0]
 
-            # before returning what we are going to send over the network, we need to simulate 
+            # before returning what the client receives, we need to simulate 
             # either corrupting part of the result OR dropping it entirely. INsert our 
             # in the middle helper function here
-            return _simulate_network_conditions(result)
+            return simulate_network_conditions(result)
 
     raise ValueError("No TXT record found in DNS response")
 
@@ -321,7 +324,7 @@ def main():
         file_data = receive_file(initial_chunk_txt, session_id, server_ip)
 
         # FLOW #5. Write the received to directory
-        output_filename = f"received_{filename}"
+        output_filename = f"received_{filename}.html"
         with open(output_filename, 'wb') as f:
             f.write(file_data)
 
