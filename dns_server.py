@@ -50,7 +50,6 @@ def create_dns_response(query_packet, src_addr):
 
         print(answer)
 
-
         # Create the response
         response = DNS(
             id=query_packet.id,
@@ -71,7 +70,6 @@ def create_dns_response(query_packet, src_addr):
         print(f"Error creating DNS response: {e}")
         return None
 
-
 def generate_checksum(data) -> str:
     print(data)
     if len(data) % 2 == 1:
@@ -84,8 +82,6 @@ def generate_checksum(data) -> str:
     checksum = f"{(sum ^ 0xFFFF):04x}"
     print(checksum)
     return checksum
-
-    
 
 def handle_get(query: str) -> str:
     """
@@ -146,6 +142,7 @@ def handle_query(query_bytes: str, src_dst: str) -> str:
        print(id2data)
 
        return id2data[session_id][0], 0
+
     elif query_string.startswith("ACK"):
 
         seq = int(query_string[4])
@@ -181,7 +178,7 @@ def start_dns_server():
     try:
         sock.bind((LISTEN_IP, DNS_PORT))
         print(f"DNS Server started on {LISTEN_IP}:{DNS_PORT}")
-        print("Responding to queries with decoded base64 payloads (TXT records)")
+        print("Responding to GET requests hidden inside DNS queries!")
         print("Waiting for DNS queries...")
     except PermissionError:
         print(f"Error: Permission denied. Please run with sudo to bind to port {DNS_PORT}")
