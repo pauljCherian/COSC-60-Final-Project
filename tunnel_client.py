@@ -12,7 +12,8 @@ from scapy.all import IP, DNSQR, UDP, DNS, sr1
 # Then we may alter the packet sent from the client
 # TEST_DROP_RATE is the rate of dropped packets
 # TEST_CORRUPT_RATE is the rate of corrupted packets
-# NOTE: ChatGPT told me how to pull .env varaibles
+# NOTE: ChatGPT told me how to pull .env varaibles and create a test mode MACRO
+# It inserted some checks to check whether we are in test 
 TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
 TEST_DROP_RATE = float(os.getenv('TEST_DROP_RATE', '0.0'))
 TEST_CORRUPT_RATE = float(os.getenv('TEST_CORRUPT_RATE', '0.0'))
@@ -27,7 +28,7 @@ test_stats = {
 # this is our helper function to corrupt a packet before the client then processes it
 # This is simulating either packet dropping or packet corruption. We insert it on inbound 
 # traffic to the client from the server
-def simulate_network_conditions(packet: bytes) -> bytes:
+def modify_packet(packet: bytes) -> bytes:
     # Simulates outbound packet, returns None if dropped, or corrupts it
     # and returns the corrupted packet
     # make sure we're testing mode
@@ -108,7 +109,7 @@ def send_dns_query(query_string: str, server_ip: str, timeout: float = 5.0) -> b
             # before returning what the client receives, we need to simulate 
             # either corrupting part of the result OR dropping it entirely. INsert our 
             # in the middle helper function here
-            return simulate_network_conditions(result)
+            return modify_packet(result)
 
     raise ValueError("No TXT record found in DNS response")
 
@@ -128,25 +129,25 @@ def send_initial_request(filename: str, session_id: str, server_ip: str) -> byte
     # Use protocol function to create GETquery with filename and session id
     GET_query = protocol.encode_get(filename, session_id)
 
-    # Retry loop for initial request (in case first packet is dropped/corrupted)
-    max_retries = 10  # Higher for testing with packet loss
+    # Loop for sending th einitial request (in case first packet is dropped/corrupted)
+    max_retries = 10 
     for attempt in range(max_retries):
         try:
             response = send_dns_query(GET_query, server_ip)
             return response
         except TimeoutError as e:
             if "TEST MODE" in str(e):
-                # Simulated drop - retry
                 if attempt < max_retries - 1:
                     continue
-            raise  # Real timeout or max retries exceeded
+            raise  
+        # corrupted format made us transmit invalid format so need to raise the error. NOTE: this is 
+        # catching a corrupted packet actually before the checksum check
         except UnicodeDecodeError:
-            # Corruption made invalid UTF-8 - retry
             if attempt < max_retries - 1:
                 continue
-            raise  # Max retries exceeded
+            raise  
 
-    raise TimeoutError("Failed to get initial response after retries")
+    raise TimeoutError("Failed to get initial response after retrying to send dns query")
 
 
 def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> bytes:
@@ -172,9 +173,11 @@ def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> byt
     expected_seq_type = 0
     try:
         current_txt = first_chunk_txt.decode()
+    # corrupted format made us transmit invalid format so need to raise the error. NOTE: this is 
+    # catching a corrupted packet actually before the checksum check   
     except UnicodeDecodeError:
-        # Corruption made invalid UTF-8 - treat as corrupted packet
-        print("First chunk corrupted (invalid UTF-8) - this test is too extreme!")
+        # Corruption made invalid packet that can't be decoded
+        print("First chunk corrupted so can not start.")
         raise ValueError("First chunk corrupted - try lower corruption rate")
 
     print(current_txt)
@@ -225,23 +228,23 @@ def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> byt
                     break
 
                 except TimeoutError as e:
-                    # If we're in testing mode we know that timeoutError is immediate
+                    # If we're in testing mode we can retry immediately without throwing the timeout error
                     if "TEST MODE" in str(e):
                         if attempt < max_attempted - 1:
                             continue
-                    raise  # Real timeout or max retries exceeded
+                    # It's an actual non-testing timeout if we get here so raise it
+                    raise  
                 except UnicodeDecodeError:
-                    # Corruption made invalid UTF-8 - treat as corrupted, retry
+                    # same as before - we can't decode the packet bc of corrupted so catch
                     if attempt < max_attempted - 1:
                         continue
-                    raise  # Max retries exceeded
+                    raise  
 
         else:
             # Checksum does not match => data corrupted
             print(f"CHECKSUM MISMATCHED. Expected {checksum}, got {packet_checksum}")
 
             # Request retransmit by sending ACK for the sequence we're expecting
-            # This tells server "I'm still waiting for seq X, please resend"
             retry_ack = protocol.encode_ack(expected_seq_type, session_id)
 
             # Retry loop for dropped packets
@@ -249,18 +252,17 @@ def receive_file(first_chunk_txt: bytes, session_id: str, server_ip: str) -> byt
             for attempt in range(max_retries):
                 try:
                     current_txt = send_dns_query(retry_ack, server_ip).decode()
-                    break  # Success! Exit retry loop
+                    break  
                 except TimeoutError as e:
                     if "TEST MODE" in str(e):
-                        # Simulated drop - retry immediately
                         if attempt < max_retries - 1:
                             continue
-                    raise  # Real timeout or max retries exceeded
+                    raise  
                 except UnicodeDecodeError:
-                    # Corruption made invalid UTF-8 - treat as corrupted, retry
+                    # Same as before
                     if attempt < max_retries - 1:
                         continue
-                    raise  # Max retries exceeded
+                    raise  
             continue
 
     # Print statistics
@@ -304,7 +306,7 @@ def main():
 
     print(f"DNS Tunnel Client")
     print(f"-----------------")
-    print(f"sequested file: {filename}")
+    print(f"requested file: {filename}")
     print(f"dns server ip: {server_ip}")
     print(f"session id: {session_id}")
     print()
